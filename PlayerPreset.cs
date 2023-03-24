@@ -5,12 +5,17 @@ using UnityEngine;
 [CreateAssetMenu(fileName = "PlayerPreset", menuName = "ScriptableObjects/PlayerPreset")]
 public class PlayerPreset : ScriptableObject
 {
+
+    [Header("Properties")]
     public float walkSpeed;
     public float jumpSpeed;
 
     public float MaxHP;
-    public float damage;
 
+
+
+
+    [Header("Animclips")]
     public AnimationClip idle;
     public AnimationClip walkRight;
     public AnimationClip walkLeft;
@@ -30,8 +35,15 @@ public class PlayerPreset : ScriptableObject
     
     public AnimationClip intro;
     public AnimationClip death;
+    public AnimationClip win;
     public AnimationClip hit;
     public AnimationClip hitAir;
+
+    public AnimationClip Ultimate;
+
+    //[Header("Damage")]
+
+    public float lightDamage, heavyDamage, kickDamage, ultimateDamage;
 
 
 }

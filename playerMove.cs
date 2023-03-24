@@ -2,12 +2,15 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
+using System.IO.Ports;
+using System;
 
 public class playerMove : MonoBehaviour
 {
     [Header("General")] 
     public bool playerTwo;
     public playerMove otherPlayer;
+    public PlayerPreset[] playerPresets;
     public PlayerPreset playerPreset;
     private Animator anim;
     private string currentState;
@@ -52,6 +55,44 @@ public class playerMove : MonoBehaviour
 
     float HInput = 0;
 
+    bool blocking = false;
+    bool imortal = false;
+
+    // controller
+    public string port = "COM1";
+
+    public static SerialPort serialport;
+
+    public bool[] button = { false, false, false, false, false, false, false, false, false };
+
+    public float timer;
+    float time;
+
+
+    string attackStr;
+    string lastAttackStr;
+    bool attackble;
+
+
+    List<int[]> attacks = new List<int[]>
+    {
+        new int[] { 4, 5, 6 },       //[0]PUNCH
+        new int[] { 1, 2, 3 },       //[1]PUCHUP
+        new int[] { 7, 8, 9 },       //[2]PUNCHDOWN
+        new int[] { 7, 5, 3 },       //[3]Kick
+        new int[] { 1, 5, 9 },       //[4]kickDown
+        new int[] { 1, 5, 3, 5, 7 }, //[5]ULT
+
+    };
+
+
+    int Touch = 0;
+    int lastTouch = 0;
+    bool valueChanged = false;
+
+
+
+    List<int> history = new List<int>();
 
 
 
@@ -60,14 +101,40 @@ public class playerMove : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
+        if (!playerTwo)
+        {
+            playerPreset = playerPresets[PlayerPrefs.GetInt("p1ID")];
+        }
+        else if (playerTwo)
+        {
+            playerPreset = playerPresets[PlayerPrefs.GetInt("p2ID")];
+        }
+
         anim = GetComponent<Animator>();
         rb =   GetComponent<Rigidbody2D>();
 
+        //FIXA SNART
         Unskip(playerPreset.intro);
+        StartCoroutine(Imortal(playerPreset.intro.length));
 
         HP = playerPreset.MaxHP;
         HPSlider.maxValue = playerPreset.MaxHP;
         HPSlider.value = HP;
+
+        //CONTROLLER
+
+        history.Add(0);
+        history.Add(0);
+        history.Add(0);
+        history.Add(0);
+        history.Add(0);
+
+        serialport = new SerialPort(port, 9600, Parity.None, 8, StopBits.One);
+        serialport.PortName = port;
+        serialport.BaudRate = 9600;
+
+        serialport.Open();
+
     }
 
     private void FixedUpdate()
@@ -105,13 +172,14 @@ public class playerMove : MonoBehaviour
 
     enum AttackState
     {
-        Attack,
-        AirAttack,
-
+        LightAttack,
         HeavyAttack,
-        SuperAttack,
-        MegaAttack
+        KickAttack,
+        UltimateAttack
     }
+
+
+
 
     AttackState attackState;
     private bool dead;
@@ -123,6 +191,62 @@ public class playerMove : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
+        // How controller will work
+
+        // system to determine attacks / moves at the top
+
+        // sets bools to true or false
+
+        // clears them after the animation chain
+
+
+        string[] input = serialport.ReadLine().Split(',');
+        serialport.ReadTimeout = 25;
+
+
+
+
+        Touch = int.Parse(input[0]);
+
+
+        if (Touch != lastTouch)
+        {
+            valueChanged = true;
+        }
+        lastTouch = Touch;
+
+        for (int i = 0; i < 9; i++)
+        {
+            if (Touch == i+1) button[i] = true; else button[i] = false;
+        }
+
+        for (int i = 0; i < 9; i++)
+        {
+            if (button[i] && valueChanged) { AddHistory(i+1); valueChanged = false; }
+        }              
+
+
+
+        for (int i = 0; i < attacks.Count; i++)
+        {
+            int attack = Check(attacks[i], i);
+            if (attack >= 0)
+            {
+                Debug.Log(attack);
+                attackStr = attack.ToString();
+
+                if(attackStr != "-1" && lastAttackStr != attackStr)
+                {
+                    attackble = true;
+                    lastAttackStr = attackStr;
+                }
+                // set bolean to true here 
+                // and then to false at the end of update
+
+            }
+        }
+
+
 
 
         //bool up;
@@ -143,26 +267,10 @@ public class playerMove : MonoBehaviour
             else if (Input.GetKey(KeyCode.RightArrow)) HInput = 1;
         }
 
-
-
-
-
-
-
-
-
-
-
-
-
         grounded = Physics2D.OverlapCircle(feetPos.position, radius, mask);
 
         //speed = Input.GetAxisRaw("Horizontal") * playerPreset.walkSpeed;
         
-
-        
-
-
 
 
         if (((Input.GetKeyDown(KeyCode.W)  && grounded) && !playerTwo && !imobilized) || ((Input.GetKeyDown(KeyCode.UpArrow) && grounded) && playerTwo && !imobilized))
@@ -217,11 +325,11 @@ public class playerMove : MonoBehaviour
 
         }
 
-        else if (hit && !grounded)
-        {
-            Unskip(playerPreset.hitAir);
-            hit = false;
-        }
+        // else if (hit && !grounded)
+        // {
+        //     Unskip(playerPreset.hitAir);
+        //     hit = false;
+        // }
 
         //else if ((Input.GetKeyDown(KeyCode.E) && !grounded && !playerTwo) && !imobilized || (Input.GetKeyDown(KeyCode.RightControl) && !grounded && playerTwo) && !imobilized)
         //{
@@ -229,51 +337,66 @@ public class playerMove : MonoBehaviour
         //    Debug.Log("airhit");
         //}       
 
-
+        //JUMP
         else if (!grounded && rb.velocity.y >= 0) ChangeAnimation(playerPreset.Jump);
 
         else if (!grounded && rb.velocity.y < 0) ChangeAnimation(playerPreset.JumpDown);
 
-        else if (hit)
+
+        //HIT
+        else if (hit && !imortal)
         {
-            Unskip(playerPreset.hit);
+            Unskip(playerPreset.hit, true);
+            StartCoroutine(Imortal(playerPreset.hit.length));
             hit = false;
         }
 
-
-        // PUNCH
-        else if ((Input.GetKeyDown(KeyCode.E) && !playerTwo) || (Input.GetKeyDown(KeyCode.Period) && playerTwo))
-        {
-            Unskip(playerPreset.Attack);
-        }
-
-        else if((Input.GetKeyDown(KeyCode.Alpha4) && !playerTwo) || (Input.GetKeyDown(KeyCode.Minus) && playerTwo))
-        {
-            Unskip(playerPreset.AttackUp);
-        }
-        
-        else if((Input.GetKeyDown(KeyCode.R) && !playerTwo) || (Input.GetKeyDown(KeyCode.Comma) && playerTwo))
-        {
-            Unskip(playerPreset.AttackDown);
-        }
-
-
-        // KICK
-        else if ((Input.GetKeyDown(KeyCode.F) && !playerTwo) || (Input.GetKeyDown(KeyCode.RightShift) && playerTwo))
-        {
-            Unskip(playerPreset.Kick);
-        }
-
-        else if ((Input.GetKeyDown(KeyCode.C) && !playerTwo) || (Input.GetKeyDown(KeyCode.RightControl) && playerTwo))
-        {
-            Unskip(playerPreset.KickDown);
-        }
-
+        // PUNCH  #####################################################################################################################
+        else if ((Input.GetKeyDown(KeyCode.G) && !playerTwo) || (attackStr == "5" && valueChanged && !playerTwo) || (Input.GetKeyDown(KeyCode.L) && playerTwo) || (attackStr == "5" && valueChanged && playerTwo))                         //#
+        {                                                                                                                          
+            Unskip(playerPreset.Ultimate);                                                                                         
+            attackState = AttackState.UltimateAttack;                                                                              
+        }                                                                                                                          
+                                                                                                                                   
+                                                                                                                                   
+        else if ((Input.GetKeyDown(KeyCode.E) && !playerTwo) || (attackStr == "0" && valueChanged && !playerTwo) || (Input.GetKeyDown(KeyCode.Period) && playerTwo) || (attackStr == "0" && valueChanged && playerTwo))                    //#
+        {                                                                                                                         
+            Unskip(playerPreset.Attack);                                                                                          
+            attackState = AttackState.HeavyAttack;                                                                                
+        }                                                                                                                         
+                                                                                                                                  
+        else if ((Input.GetKeyDown(KeyCode.Alpha4) && !playerTwo) || (attackStr == "1" && valueChanged && !playerTwo) || (Input.GetKeyDown(KeyCode.Minus) && playerTwo) || (attackStr == "1" && valueChanged && playerTwo))                 //#
+        {                                                                                                                         
+            Unskip(playerPreset.AttackUp);                                                                                        
+            attackState = AttackState.LightAttack;                                                                                
+        }                                                                                                                         
+                                                                                                                                  
+        else if ((Input.GetKeyDown(KeyCode.R) && !playerTwo) || (attackStr == "2" && valueChanged && !playerTwo) || (Input.GetKeyDown(KeyCode.Comma) && playerTwo) || (attackStr == "2" && valueChanged && playerTwo))                     //#
+        {                                                                                                                         
+            Unskip(playerPreset.AttackDown);                                                                                      
+            attackState = AttackState.LightAttack;                                                                                
+        }                                                                                                                         
+                                                                                                                                  
+                                                                                                                                  
+        // KICK                                                                                                                   
+        else if ((Input.GetKeyDown(KeyCode.F) && !playerTwo) || (attackStr == "3" && valueChanged && !playerTwo) || (Input.GetKeyDown(KeyCode.RightShift) && playerTwo) || (attackStr == "3" && valueChanged && playerTwo))             //#
+        {                                                                                                                          
+            Unskip(playerPreset.Kick);                                                                                             
+            attackState = AttackState.KickAttack;                                                                                  
+        }                                                                                                                          
+                                                                                                                                   
+        else if ((Input.GetKeyDown(KeyCode.C) && !playerTwo) || (attackStr == "4" && valueChanged && !playerTwo) || (Input.GetKeyDown(KeyCode.RightControl) && playerTwo) || (attackStr == "4" && valueChanged && playerTwo))             //#
+        {                                                                                                                      
+            Unskip(playerPreset.KickDown);                                                                                     
+            attackState = AttackState.KickAttack;                                                                              
+        }                                                                                                                      
+        // ############################################################################################################################
 
         // Block
         else if (Input.GetKeyDown(KeyCode.S) && !playerTwo || Input.GetKeyDown(KeyCode.DownArrow) && playerTwo)
         {
             Unskip(playerPreset.blockDown);
+            blocking = true;
         }
 
         else if (Input.GetKey(KeyCode.S) && !playerTwo || Input.GetKey(KeyCode.DownArrow) && playerTwo)
@@ -285,6 +408,7 @@ public class playerMove : MonoBehaviour
         else if (Input.GetKeyUp(KeyCode.S) && !playerTwo || Input.GetKeyUp(KeyCode.DownArrow) && playerTwo)
         {
             Unskip(playerPreset.blockUp);
+            blocking = false;
         }
 
         else if (speed > 0) 
@@ -319,25 +443,27 @@ public class playerMove : MonoBehaviour
 
         switch (attackState)
         {
-            case AttackState.Attack:
-                damage = 1;
-
+            case AttackState.LightAttack:
+                damage = playerPreset.lightDamage;
                 break;
-            case AttackState.AirAttack:
-                damage = 2;
-
-                break;
+            
             case AttackState.HeavyAttack:
+                damage = playerPreset.heavyDamage;
                 break;
-            case AttackState.SuperAttack:
+           
+            case AttackState.KickAttack:
+                damage = playerPreset.kickDamage;
                 break;
-            case AttackState.MegaAttack:
+            
+            case AttackState.UltimateAttack:
+                damage = playerPreset.ultimateDamage;
                 break;
+           
             default:
                 break;
         }
 
-
+        attackble = false;
         attackTimer -= Time.deltaTime;
     }
 
@@ -355,13 +481,24 @@ public class playerMove : MonoBehaviour
         }
         
     }
+    void ChangeAnimation(AnimationClip animClip, bool bypass)
+    {
+        if (bypass)
+        {
+            if (animClip.name == currentState) return;
+
+            anim.Play(animClip.name);
+
+            currentState = animClip.name;
+        }      
+    }
 
 
-    void AttackTimer(AnimationClip animClip)
+    void AttackTimer(AnimationClip animClip, bool bypass)
     {
         if (attackTimer <= 0)
         {
-            attackTimer = animClip.length;
+            attackTimer = animClip.length /* * (1/animClip.apparentSpeed)*/;
         }
     }
 
@@ -369,7 +506,13 @@ public class playerMove : MonoBehaviour
     void Unskip(AnimationClip animClip)
     {
         ChangeAnimation(animClip);
-        AttackTimer(animClip);
+        AttackTimer(animClip,false);
+
+    }
+    void Unskip(AnimationClip animClip, bool bypass)
+    {
+        ChangeAnimation(animClip, bypass);
+        AttackTimer(animClip, true);
 
     }
 
@@ -386,21 +529,53 @@ public class playerMove : MonoBehaviour
 
     public void hitEnemy()
     {
-        otherPlayer.TakeDamage(damage * playerPreset.damage);
+        otherPlayer.TakeDamage(damage);
         Debug.Log("hitenemy");
     }
+
+
+    public IEnumerator Imortal(float time)
+    {
+        imortal = true;
+        yield return new WaitForSeconds(time);
+        imortal = false;
+    }
+
+    
 
 
     // play hit animation.
     public void TakeDamage(float damageVal)
     {
-        HP -= damageVal;
-        HPSlider.value = HP;
+        if (!blocking)
+        {
+            HP -= damageVal;
+            HPSlider.value = HP;
 
-        hit = true;
+            hit = true;
 
-        if (HP <= 0) StartCoroutine( Die() );
+            // knockback
 
+            transform.position -= new Vector3(2 * transform.localScale.x, 0, 0);
+
+            if (HP <= 0) 
+            { 
+                StartCoroutine( Die() );
+                otherPlayer.Win();
+            } 
+            
+        }
+        else
+        {
+            transform.position -= new Vector3(1 * transform.localScale.x, 0, 0);
+        }
+
+    }
+
+    void Win()
+    {
+        Unskip(playerPreset.win, true);
+        attackTimer = 5;
     }
 
 
@@ -414,5 +589,57 @@ public class playerMove : MonoBehaviour
 
         deathPanel.SetActive(true);
      
+    }
+
+
+
+    // controller
+
+    int Check(int[] attack, int attackId)
+    {
+        //Debug.Log("check");
+
+        Array.Reverse(attack);
+
+        for (int i = 0; i < attack.Length; i++)
+        {
+            if (!(history[4 - i] == attack[i]))
+            {
+                return -1;
+            }
+        }
+
+        Clear();
+        return attackId;
+    }
+
+    void AddHistory(int number)
+    {
+        history.RemoveAt(0);
+        history.Add(number);
+
+
+
+        //text.text = (history[0] + " " + history[1] + " " + history[2] + " " + history[3] + " " + history[4]);
+
+    }
+
+    void Clear()
+    {
+        history.Clear();
+        history.Add(0);
+        history.Add(0);
+        history.Add(0);
+        history.Add(0);
+        history.Add(0);
+
+        //text.text = (history[0] + " " + history[1] + " " + history[2] + " " + history[3] + " " + history[4]);
+    }
+
+
+    void OnApplicationQuit()
+    {
+        if (serialport != null)
+            serialport.Close();
     }
 }
